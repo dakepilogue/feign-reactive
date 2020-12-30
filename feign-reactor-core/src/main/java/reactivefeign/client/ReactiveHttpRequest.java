@@ -23,6 +23,7 @@ import java.util.Map;
 
 import static feign.Util.checkNotNull;
 import static reactivefeign.utils.FeignUtils.methodTag;
+import static reactivefeign.utils.HttpUtils.CONTENT_TYPE_HEADER;
 
 /**
  * An immutable reactive request to an http server.
@@ -36,26 +37,31 @@ public final class ReactiveHttpRequest {
   private final URI uri;
   private final Map<String, List<String>> headers;
   private final Publisher<Object> body;
+  private final Map<String, List<Object>> formVariables;
+  private final String contentType;
 
   /**
    * No parameters can be null except {@code body}. All parameters must be effectively immutable,
    * via safe copies, not mutating or otherwise.
    */
   public ReactiveHttpRequest(MethodMetadata methodMetadata, Target<?> target,
-                             URI uri, Map<String, List<String>> headers, Publisher<Object> body) {
+                             URI uri, Map<String, List<String>> headers, Publisher<Object> body,
+                             Map<String, List<Object>> formVariables) {
     this.methodMetadata = checkNotNull(methodMetadata, "method of %s", uri);
     this.target = checkNotNull(target, "target of %s", uri);
     this.uri = checkNotNull(uri, "url");
     this.headers = checkNotNull(headers, "headers of %s %s", methodMetadata, uri);
     this.body = body; // nullable
+    this.formVariables = formVariables;
+    this.contentType = getContentTypeValue(this.headers);
   }
 
   public ReactiveHttpRequest(ReactiveHttpRequest request, URI uri) {
-    this(request.methodMetadata, request.target, uri, request.headers, request.body);
+    this(request.methodMetadata, request.target, uri, request.headers, request.body, request.formVariables);
   }
 
   public ReactiveHttpRequest(ReactiveHttpRequest request, Publisher<Object> body){
-     this(request.methodMetadata, request.target, request.uri, request.headers, body);
+     this(request.methodMetadata, request.target, request.uri, request.headers, body, request.formVariables);
   }
 
   /* Method to invoke on the server. */
@@ -86,4 +92,26 @@ public final class ReactiveHttpRequest {
     return methodTag(methodMetadata);
   }
 
+  public Map<String, List<Object>> formVariables() {
+    return formVariables;
+  }
+
+  public String contentType() {
+    return contentType;
+  }
+
+  private String getContentTypeValue(Map<String, List<String>> headers) {
+    for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+      if (!entry.getKey().equalsIgnoreCase(CONTENT_TYPE_HEADER)) {
+        continue;
+      }
+      for (String contentTypeValue : entry.getValue()) {
+        if (contentTypeValue == null) {
+          continue;
+        }
+        return contentTypeValue;
+      }
+    }
+    return null;
+  }
 }

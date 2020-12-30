@@ -1,17 +1,30 @@
 /**
  * Copyright 2018 The Feign Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the License
- * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
- * or implied. See the License for the specific language governing permissions and limitations under
- * the License.
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
  */
 package reactivefeign.methodhandler;
+
+import static feign.Util.checkNotNull;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.Arrays.asList;
+import static java.util.Collections.singletonList;
+import static java.util.stream.Collectors.groupingBy;
+import static java.util.stream.Collectors.mapping;
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toMap;
+import static reactivefeign.utils.MultiValueMapUtils.add;
+import static reactivefeign.utils.MultiValueMapUtils.addAll;
+import static reactivefeign.utils.MultiValueMapUtils.addAllOrdered;
+import static reactivefeign.utils.MultiValueMapUtils.addOrdered;
+import static reactivefeign.utils.StringUtils.cutTail;
 
 import feign.MethodMetadata;
 import feign.QueryMapEncoder;
@@ -19,6 +32,20 @@ import feign.RequestTemplate;
 import feign.Target;
 import feign.querymap.FieldQueryMapEncoder;
 import feign.template.UriUtils;
+import java.net.URI;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.reactivestreams.Publisher;
 import reactivefeign.client.ReactiveHttpClient;
 import reactivefeign.client.ReactiveHttpRequest;
@@ -26,25 +53,9 @@ import reactivefeign.publisher.PublisherHttpClient;
 import reactivefeign.utils.Pair;
 import reactor.core.publisher.Mono;
 
-import java.net.URI;
-import java.util.*;
-import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import static feign.Util.checkNotNull;
-import static java.nio.charset.StandardCharsets.UTF_8;
-import static java.util.Arrays.asList;
-import static java.util.Collections.singletonList;
-import static java.util.stream.Collectors.*;
-import static reactivefeign.utils.MultiValueMapUtils.*;
-import static reactivefeign.utils.StringUtils.cutTail;
-
 /**
  * Method handler for asynchronous HTTP requests via {@link PublisherHttpClient}.
- *
+ * <p>
  * Transforms method invocation into request that executed by {@link ReactiveHttpClient}.
  *
  * @author Sergii Karpenko
@@ -61,29 +72,39 @@ public class PublisherClientMethodHandler implements MethodHandler {
     private final Map<String, Collection<String>> queriesAll;
     private final Map<String, List<Function<Substitutions, List<String>>>> queryExpanders;
     private final URI staticUri;
+    private final List<String> formParams;
+    private final Map<String, List<Function<Substitutions, List<Object>>>> formExpanders;
 
     private final QueryMapEncoder queryMapEncoder = new FieldQueryMapEncoder();
 
     public PublisherClientMethodHandler(Target<?> target,
-                                        MethodMetadata methodMetadata,
-                                        PublisherHttpClient publisherClient) {
+        MethodMetadata methodMetadata,
+        PublisherHttpClient publisherClient) {
         this.target = checkNotNull(target, "target must be not null");
         this.methodMetadata = checkNotNull(methodMetadata,
-                "methodMetadata must be not null");
+            "methodMetadata must be not null");
         this.publisherClient = checkNotNull(publisherClient, "client must be not null");
         RequestTemplate requestTemplate = methodMetadata.template();
         this.pathExpander = buildUrlExpandFunction(requestTemplate, target);
-        this.headerExpanders = buildExpanders(requestTemplate.headers());
+        this.headerExpanders = buildExpanders(requestTemplate.headers(), String.class);
 
         this.queriesAll = new HashMap<>(requestTemplate.queries());
-        methodMetadata.formParams()
-                .forEach(param -> add(queriesAll, param, "{" + param + "}"));
-        this.queryExpanders = buildExpanders(queriesAll);
+        if (!methodMetadata.formParams().isEmpty() && methodMetadata.template().bodyTemplate() == null) {
+            this.formParams = methodMetadata.formParams();
+            Map<String, Collection<String>> formMap = new HashMap<>();
+            methodMetadata.formParams()
+                .forEach(param -> add(formMap, param, "{" + param + "}"));
+            this.formExpanders = buildExpanders(formMap, Object.class);
+        } else {
+            this.formParams = null;
+            this.formExpanders = null;
+        }
+        this.queryExpanders = buildExpanders(this.queriesAll, String.class);
 
         //static template (POST & PUT)
-        if(pathExpander instanceof StaticPathExpander
-                && queriesAll.isEmpty()
-                && methodMetadata.queryMapIndex() == null){
+        if (pathExpander instanceof StaticPathExpander
+            && queriesAll.isEmpty()
+            && methodMetadata.queryMapIndex() == null) {
             staticUri = URI.create(target.url() + requestTemplate.url());
         } else {
             staticUri = null;
@@ -103,12 +124,12 @@ public class PublisherClientMethodHandler implements MethodHandler {
 
         Map<String, List<String>> headers = headers(argv, substitutions);
 
-        return new ReactiveHttpRequest(methodMetadata, target, uri, headers, body(argv));
+        return new ReactiveHttpRequest(methodMetadata, target, uri, headers, body(argv), form(substitutions));
     }
 
     private URI buildUri(Object[] argv, Substitutions substitutions) {
         //static template
-        if(staticUri != null){
+        if (staticUri != null) {
             return staticUri;
         }
 
@@ -122,11 +143,11 @@ public class PublisherClientMethodHandler implements MethodHandler {
 
     private Substitutions buildSubstitutions(Object[] argv) {
         Map<String, Object> substitutions = methodMetadata.indexToName().entrySet().stream()
-                .filter(e -> argv[e.getKey()] != null)
-                .flatMap(e -> e.getValue().stream()
-                        .map(v -> new AbstractMap.SimpleImmutableEntry<>(e.getKey(), v)))
-                .collect(toMap(Map.Entry::getValue,
-                        entry -> argv[entry.getKey()]));
+            .filter(e -> argv[e.getKey()] != null)
+            .flatMap(e -> e.getValue().stream()
+                .map(v -> new AbstractMap.SimpleImmutableEntry<>(e.getKey(), v)))
+            .collect(toMap(Map.Entry::getValue,
+                entry -> argv[entry.getKey()]));
 
         URI url = methodMetadata.urlIndex() != null ? (URI) argv[methodMetadata.urlIndex()] : null;
         return new Substitutions(substitutions, url);
@@ -149,7 +170,7 @@ public class PublisherClientMethodHandler implements MethodHandler {
                 }
             }
         }
-        if(queryBuilder.length() > 0) {
+        if (queryBuilder.length() > 0) {
             queryBuilder.deleteCharAt(0);
             return queryBuilder.insert(0, '?').toString();
         } else {
@@ -158,32 +179,32 @@ public class PublisherClientMethodHandler implements MethodHandler {
     }
 
     protected Map<String, Collection<String>> queries(Object[] argv,
-                                                      Substitutions substitutions) {
+        Substitutions substitutions) {
         Map<String, Collection<String>> queries = new LinkedHashMap<>();
 
         // queries from template
         queriesAll.keySet()
-                .forEach(queryName -> addAll(queries, queryName,
-                        queryExpanders.get(queryName).stream()
-                                .map(expander -> expander.apply(substitutions))
-                                .filter(Objects::nonNull)
-                                .flatMap(Collection::stream)
-                                .collect(toList())));
+            .forEach(queryName -> addAll(queries, queryName,
+                queryExpanders.get(queryName).stream()
+                    .map(expander -> expander.apply(substitutions))
+                    .filter(Objects::nonNull)
+                    .flatMap(Collection::stream)
+                    .collect(toList())));
 
         // queries from args
         if (methodMetadata.queryMapIndex() != null) {
             Object queryMapObject = argv[methodMetadata.queryMapIndex()];
-            if(queryMapObject != null){
+            if (queryMapObject != null) {
                 Map<String, ?> queryMap = queryMapObject instanceof Map
-                        ? (Map<String, ?>) queryMapObject
-                        : queryMapEncoder.encode(queryMapObject);
+                    ? (Map<String, ?>) queryMapObject
+                    : queryMapEncoder.encode(queryMapObject);
                 queryMap.forEach((key, value) -> {
-                            if (value instanceof Iterable) {
-                                ((Iterable<?>) value).forEach(element -> add(queries, key, element.toString()));
-                            } else if (value != null) {
-                                add(queries, key, value.toString());
-                            }
-                        });
+                    if (value instanceof Iterable) {
+                        ((Iterable<?>) value).forEach(element -> add(queries, key, element.toString()));
+                    } else if (value != null) {
+                        add(queries, key, value.toString());
+                    }
+                });
             }
         }
 
@@ -196,24 +217,24 @@ public class PublisherClientMethodHandler implements MethodHandler {
 
         // headers from template
         methodMetadata.template().headers().keySet()
-                .forEach(headerName -> addAllOrdered(headers, headerName,
-                        headerExpanders.get(headerName).stream()
-                                .map(expander -> expander.apply(substitutions))
-                                .filter(Objects::nonNull)
-                                .flatMap(Collection::stream)
-                                .collect(toList())));
+            .forEach(headerName -> addAllOrdered(headers, headerName,
+                headerExpanders.get(headerName).stream()
+                    .map(expander -> expander.apply(substitutions))
+                    .filter(Objects::nonNull)
+                    .flatMap(Collection::stream)
+                    .collect(toList())));
 
         // headers from args
         if (methodMetadata.headerMapIndex() != null) {
             ((Map<String, ?>) argv[methodMetadata.headerMapIndex()])
-                    .forEach((key, value) -> {
-                        if (value instanceof Iterable) {
-                            ((Iterable<?>) value)
-                                    .forEach(element -> addOrdered(headers, key, element.toString()));
-                        } else {
-                            addOrdered(headers, key, value.toString());
-                        }
-                    });
+                .forEach((key, value) -> {
+                    if (value instanceof Iterable) {
+                        ((Iterable<?>) value)
+                            .forEach(element -> addOrdered(headers, key, element.toString()));
+                    } else {
+                        addOrdered(headers, key, value.toString());
+                    }
+                });
         }
 
         return headers;
@@ -235,68 +256,82 @@ public class PublisherClientMethodHandler implements MethodHandler {
         }
     }
 
-    private static Map<String, List<Function<Substitutions, List<String>>>> buildExpanders(
-            Map<String, Collection<String>> templates) {
+    protected Map<String, List<Object>> form(Substitutions substitutions) {
+        if (formParams != null) {
+            Map<String, List<Object>> forms = new LinkedHashMap<>();
+
+            // formParams from template
+            formParams.forEach(formParam -> addAllOrdered(forms, formParam,
+                    formExpanders.get(formParam).stream()
+                        .map(expander -> expander.apply(substitutions))
+                        .filter(Objects::nonNull)
+                        .flatMap(Collection::stream)
+                        .collect(toList())));
+            return forms;
+        }
+        return null;
+    }
+
+    private static <T> Map<String, List<Function<Substitutions, List<T>>>> buildExpanders(
+        Map<String, Collection<String>> templates, Class<T> clazz) {
         Stream<Pair<String, String>> templatesFlattened = templates.entrySet().stream()
-                .flatMap(e -> e.getValue().stream()
-                        .map(v -> new Pair<>(e.getKey(), v)));
+            .flatMap(e -> e.getValue().stream()
+                .map(v -> new Pair<>(e.getKey(), v)));
         return templatesFlattened.collect(groupingBy(
-                entry -> entry.left,
-                mapping(entry -> buildExpandFunction(entry.right), toList())));
+            entry -> entry.left,
+            mapping(entry -> buildExpandFunction(entry.right, clazz), toList())));
     }
 
     /**
-     *
      * @param template
      * @return function that able to map substitutions map to actual value for specified template
      */
-    private static Function<Substitutions, List<String>> buildExpandFunction(String template) {
+    private static <T> Function<Substitutions, List<T>> buildExpandFunction(String template, Class<T> clazz) {
         Matcher matcher = SUBSTITUTION_PATTERN.matcher(template);
-        if(matcher.matches()){
+        boolean toString = String.class.equals(clazz);
+        if (matcher.matches()) {
             String placeholder = matcher.group(1);
 
             return substitutions -> {
                 Object substitution = substitutions.placeholderToSubstitution.get(placeholder);
                 if (substitution != null) {
-                    if(substitution instanceof Iterable){
-                        List<String> stringValues = new ArrayList<>();
-                        ((Iterable<?>) substitution).forEach(o -> stringValues.add(o.toString()));
-                        return stringValues;
-                    } else if(substitution instanceof Object[]){
-                        List<String> stringValues = new ArrayList<>(((Object[]) substitution).length);
-                        (asList((Object[])substitution)).forEach(o -> stringValues.add(o.toString()));
-                        return stringValues;
-                    }
-                    else {
-                        return singletonList(substitution.toString());
+                    if (substitution instanceof Iterable) {
+                        List<T> values = new ArrayList<>();
+                        ((Iterable<?>) substitution).forEach(o -> values.add((T) (toString ? o.toString() : o)));
+                        return values;
+                    } else if (substitution instanceof Object[]) {
+                        List<T> values = new ArrayList<>(((Object[]) substitution).length);
+                        (asList((Object[]) substitution)).forEach(o -> values.add((T) (toString ? o.toString() : o)));
+                        return values;
+                    } else {
+                        return singletonList((T) (toString ? substitution.toString() : substitution));
                     }
                 } else {
                     return null;
                 }
             };
         } else {
-            return substitutions -> singletonList(template);
+            return substitutions -> singletonList((T) template);
         }
     }
 
     private static Function<Substitutions, String> buildUrlExpandFunction(
-            RequestTemplate requestTemplate, Target<?> target) {
-        if(target instanceof Target.EmptyTarget){
+        RequestTemplate requestTemplate, Target<?> target) {
+        if (target instanceof Target.EmptyTarget) {
             return expandUrlForEmptyTarget(buildUrlExpandFunction(
-                    cutTail(requestTemplate.url(), requestTemplate.queryLine())));
+                cutTail(requestTemplate.url(), requestTemplate.queryLine())));
         } else {
             return buildUrlExpandFunction(target.url() +
-                    cutTail(requestTemplate.url(), requestTemplate.queryLine()));
+                cutTail(requestTemplate.url(), requestTemplate.queryLine()));
         }
     }
 
     private static Function<Substitutions, String> expandUrlForEmptyTarget(
-            Function<Substitutions, String> expandFunction){
+        Function<Substitutions, String> expandFunction) {
         return substitutions -> substitutions.url.toString() + expandFunction.apply(substitutions);
     }
 
     /**
-     *
      * @param template
      * @return function that able to map substitutions map to actual value for specified template
      */
@@ -316,14 +351,14 @@ public class PublisherClientMethodHandler implements MethodHandler {
                 if (substitution != null) {
                     return UriUtils.encode(substitution.toString(), UTF_8);
                 } else {
-                    throw new IllegalArgumentException("No substitution in url for:"+placeholder);
+                    throw new IllegalArgumentException("No substitution in url for:" + placeholder);
                 }
             });
             previousMatchEnd = matcher.end();
         }
 
         //no substitutions in path
-        if(previousMatchEnd == 0){
+        if (previousMatchEnd == 0) {
             return new StaticPathExpander(template);
         }
 
@@ -333,10 +368,10 @@ public class PublisherClientMethodHandler implements MethodHandler {
         }
 
         return substitutions -> chunks.stream().map(chunk -> chunk.apply(substitutions))
-                .collect(Collectors.joining());
+            .collect(Collectors.joining());
     }
 
-    private static class StaticPathExpander implements Function<Substitutions, String>{
+    private static class StaticPathExpander implements Function<Substitutions, String> {
 
         private final String staticPath;
 
@@ -351,6 +386,7 @@ public class PublisherClientMethodHandler implements MethodHandler {
     }
 
     private static class Substitutions {
+
         private final URI url;
         private final Map<String, Object> placeholderToSubstitution;
 
