@@ -108,28 +108,34 @@ public class WebReactiveOptions extends ReactiveOptions {
       return this;
     }
 
-    public void setKeepAlive(boolean keepAlive) {
+    public Builder setKeepAlive(boolean keepAlive) {
       this.keepAlive = keepAlive;
+      return this;
     }
 
-    public void setMaxIdleTime(Duration maxIdleTime) {
+    public Builder setMaxIdleTime(Duration maxIdleTime) {
       this.maxIdleTime = maxIdleTime;
+      return this;
     }
 
-    public void setMaxLifeTime(Duration maxLifeTime) {
+    public Builder setMaxLifeTime(Duration maxLifeTime) {
       this.maxLifeTime = maxLifeTime;
+      return this;
     }
 
-    public void setMaxConnections(Integer maxConnections) {
+    public Builder setMaxConnections(Integer maxConnections) {
       this.maxConnections = maxConnections;
+      return this;
     }
 
-    public void setPendingAcquireTimeout(Duration pendingAcquireTimeout) {
+    public Builder setPendingAcquireTimeout(Duration pendingAcquireTimeout) {
       this.pendingAcquireTimeout = pendingAcquireTimeout;
+      return this;
     }
 
-    public void setEvictInBackground(Duration evictInBackground) {
+    public Builder setEvictInBackground(Duration evictInBackground) {
       this.evictInBackground = evictInBackground;
+      return this;
     }
 
     public WebReactiveOptions build() {
