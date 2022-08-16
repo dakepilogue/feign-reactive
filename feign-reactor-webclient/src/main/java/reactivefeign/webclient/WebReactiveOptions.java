@@ -13,6 +13,7 @@
  */
 package reactivefeign.webclient;
 
+import java.time.Duration;
 import reactivefeign.ReactiveOptions;
 
 /**
@@ -28,13 +29,25 @@ public class WebReactiveOptions extends ReactiveOptions {
 
   private final Long readTimeoutMillis;
   private final Long writeTimeoutMillis;
+  private boolean keepAlive;
+  private Duration maxIdleTime;
+  private Duration maxLifeTime;
+  private Integer maxConnections = 500;
+  private Duration pendingAcquireTimeout;
+  private Duration evictInBackground;
 
-  private WebReactiveOptions(Boolean useHttp2, Long connectTimeoutMillis, Long readTimeoutMillis,
-                             Long writeTimeoutMillis, Boolean tryUseCompression) {
+  private WebReactiveOptions(Boolean useHttp2, Long connectTimeoutMillis, Boolean tryUseCompression,
+      Long readTimeoutMillis, Long writeTimeoutMillis, boolean keepAlive, Duration maxIdleTime,
+      Duration maxLifeTime, Integer maxConnections, Duration pendingAcquireTimeout, Duration evictInBackground) {
     super(useHttp2, connectTimeoutMillis, tryUseCompression);
-
     this.readTimeoutMillis = readTimeoutMillis;
     this.writeTimeoutMillis = writeTimeoutMillis;
+    this.keepAlive = keepAlive;
+    this.maxIdleTime = maxIdleTime;
+    this.maxLifeTime = maxLifeTime;
+    this.maxConnections = maxConnections;
+    this.pendingAcquireTimeout = pendingAcquireTimeout;
+    this.evictInBackground = evictInBackground;
   }
 
   public Long getReadTimeoutMillis() {
@@ -45,6 +58,30 @@ public class WebReactiveOptions extends ReactiveOptions {
     return writeTimeoutMillis;
   }
 
+  public boolean isKeepAlive() {
+    return keepAlive;
+  }
+
+  public Duration getMaxIdleTime() {
+    return maxIdleTime;
+  }
+
+  public Duration getMaxLifeTime() {
+    return maxLifeTime;
+  }
+
+  public Integer getMaxConnections() {
+    return maxConnections;
+  }
+
+  public Duration getPendingAcquireTimeout() {
+    return pendingAcquireTimeout;
+  }
+
+  public Duration getEvictInBackground() {
+    return evictInBackground;
+  }
+
   public boolean isEmpty() {
     return super.isEmpty() && readTimeoutMillis == null && writeTimeoutMillis == null;
   }
@@ -52,6 +89,12 @@ public class WebReactiveOptions extends ReactiveOptions {
   public static class Builder extends ReactiveOptions.Builder{
     private Long readTimeoutMillis;
     private Long writeTimeoutMillis;
+    private boolean keepAlive;
+    private Duration maxIdleTime = Duration.ofMillis(-1);
+    private Duration maxLifeTime = Duration.ofMillis(-1);
+    private Integer maxConnections = 500;
+    private Duration pendingAcquireTimeout = Duration.ofSeconds(45);
+    private Duration evictInBackground;
 
     public Builder() {}
 
@@ -65,9 +108,34 @@ public class WebReactiveOptions extends ReactiveOptions {
       return this;
     }
 
+    public void setKeepAlive(boolean keepAlive) {
+      this.keepAlive = keepAlive;
+    }
+
+    public void setMaxIdleTime(Duration maxIdleTime) {
+      this.maxIdleTime = maxIdleTime;
+    }
+
+    public void setMaxLifeTime(Duration maxLifeTime) {
+      this.maxLifeTime = maxLifeTime;
+    }
+
+    public void setMaxConnections(Integer maxConnections) {
+      this.maxConnections = maxConnections;
+    }
+
+    public void setPendingAcquireTimeout(Duration pendingAcquireTimeout) {
+      this.pendingAcquireTimeout = pendingAcquireTimeout;
+    }
+
+    public void setEvictInBackground(Duration evictInBackground) {
+      this.evictInBackground = evictInBackground;
+    }
+
     public WebReactiveOptions build() {
-      return new WebReactiveOptions(useHttp2, connectTimeoutMillis, readTimeoutMillis,
-              writeTimeoutMillis, acceptCompressed);
+      return new WebReactiveOptions(useHttp2, connectTimeoutMillis, acceptCompressed, readTimeoutMillis,
+              writeTimeoutMillis, keepAlive, maxIdleTime, maxLifeTime, maxConnections, pendingAcquireTimeout,
+              evictInBackground);
     }
   }
 }

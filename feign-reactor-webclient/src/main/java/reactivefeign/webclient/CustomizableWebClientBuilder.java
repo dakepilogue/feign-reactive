@@ -16,6 +16,7 @@ import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriBuilderFactory;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
 import reactor.netty.tcp.TcpClient;
 
 import java.util.ArrayList;
@@ -272,7 +273,19 @@ public class CustomizableWebClientBuilder implements WebClient.Builder {
     }
 
     public static ReactorClientHttpConnector getReactorClientHttpConnector(WebReactiveOptions webOptions) {
-        TcpClient tcpClient = TcpClient.create();
+        // set ConnectionProvider
+        ConnectionProvider.Builder builder = ConnectionProvider.builder("tcp")
+            .maxConnections(webOptions.getMaxConnections())
+            .maxIdleTime(webOptions.getMaxIdleTime())
+            .maxLifeTime(webOptions.getMaxLifeTime());
+        if (webOptions.getPendingAcquireTimeout() != null) {
+            builder = builder.pendingAcquireTimeout(webOptions.getPendingAcquireTimeout());
+        }
+        if (webOptions.getEvictInBackground() != null) {
+            builder = builder.evictInBackground(webOptions.getEvictInBackground());
+        }
+
+        TcpClient tcpClient = TcpClient.create(builder.build());
         if (webOptions.getConnectTimeoutMillis() != null) {
             tcpClient = tcpClient.option(ChannelOption.CONNECT_TIMEOUT_MILLIS,
                     webOptions.getConnectTimeoutMillis().intValue());
