@@ -8,6 +8,19 @@
     <version>2.0.25</version>
     <packaging>pom</packaging>
 
+    <distributionManagement>
+        <repository>
+            <id>rdc-releases</id>
+            <name>rdc-releases</name>
+            <url>https://packages.aliyun.com/maven/repository/2314853-release-pOauLb</url>
+        </repository>
+        <snapshotRepository>
+            <id>rdc-snapshots</id>
+            <name>rdc-snapshots</name>
+            <url>https://packages.aliyun.com/maven/repository/2314853-snapshot-5bgKBb</url>
+        </snapshotRepository>
+    </distributionManagement>
+
     <modules>
         <module>feign-reactor-core</module>
         <module>feign-reactor-webclient</module>
